@@ -15,21 +15,13 @@ the game header file */
 #define SCREEN_SCALE 1
 #define SCREEN_NAME "Prototype"
 
-/* Defining our variables in this way allows for the w, h, scale, and name to be 
-accessed from other points within our code base. Now we need to rewrite void 
-game_init(void); and void game_quit(void); to get our screen to display and to c
-lean up any memory left when we’re finished. */
-
 void game_init(void);
 void game_quit(void);
-
-/* This provides us with a globally defined game object which will be used to 
-house all persistent game information. Doing things this way will help cut down 
-on function parameters, which can easily get out-of-hand if not kept in check. */
 
 static struct {
     // define "attributes"
     SDL_bool running;
+    
     struct {
         unsigned int w;
         unsigned int h;
@@ -37,6 +29,11 @@ static struct {
         SDL_Window *window;
         SDL_Renderer *renderer;
     } screen;
+
+    struct {
+        unsigned int n;
+        SDL_Surface **spritesheet;
+    } gfx;
 
     /// define methods
     void (*init)(void);
@@ -50,15 +47,20 @@ static struct {
         NULL,
         NULL
     },
+    { 0, NULL },
     game_init,
     game_quit
 };
 
-/* What we are doing here in the initialization step is printing the function 
-name to the standard out stream, initializing the SDL library, and setting the 
-game to a “running” state. During the SDL initialization the library will build 
-and allocate all the objects and variables needed to make a game window, provide 
-game audio, timers, events, joystick controls, etc. */
+/* This takes our original Game “soliton” and adds a “gfx” module. The graphics 
+module contains unsigned int n;  which is the number of 8×8 sprites found within 
+our .bmp spritesheet, and SDL_Surface** spritesheet; which is an array of SDL 
+surfaces. Each 8×8 sprite will receive its own SDL surface. Later we will arrange 
+these surfaces into textures to be drawn with out renderer. */
+
+/* Next we will read in “spritesheet.bmp”, set the color key to 0xFF00FF and 
+populate the spritesheet array with surfaces. This code should be placed within 
+the void game_init(void); function. */
 
 void game_init(void) {
     printf("game_init()\n");
@@ -71,6 +73,33 @@ void game_init(void) {
     unsigned int w = Game.screen.w;
     unsigned int h = Game.screen.h;
     const char *name = Game.screen.name;
+
+    SDL_Surface *surface = SDL_LoadBMP("spritesheet.bmp");
+    int n = ((surface->w/8)*(surface->h/8) + 1);
+
+    Game.gfx.n = n;
+    Game.gfx.spritesheet = (SDL_Surface **)malloc(sizeof(SDL_Surface *) *n);
+
+    int i, x, y;
+    SDL_Rect rect = { 0, 0, 8, 8 };
+    for (i = 0; i < n; i++) {
+        Game.gfx.spritesheet[i] = SDL_CreateRGBSurface(0, 8, 8, 24, 0x00, 0x00, 0x00, 0x00);
+        SDL_SetColorKey(Game.gfx.spritesheet[i], 1, 0xFF00FF);
+        SDL_FillRect(Game.gfx.spritesheet[i], 0, 0xFF00FF);
+        if (i != 0) {
+            x = (i - 1) % (surface->w/8);
+            y = (i - x) / (surface->w/8);
+            rect.x = x * 8;
+            rect.y = y * 8;
+            SDL_BlitSurface(surface, &rect, Game.gfx.spritesheet[i], NULL);
+        }
+    }
+    SDL_FreeSurface(surface);
+
+/* This will give us an array of sprite surfaces with the first sprite 
+(spritesheet[0] ) being a completely transparent surface. This is done on purpose 
+so that the surface array an easily be integrated with the Tiled map editor, which 
+we will discuss in future tutorials. */
 
     Game.screen.window = SDL_CreateWindow(
         name,
@@ -85,31 +114,41 @@ void game_init(void) {
     Game.running = SDL_TRUE;
 }
 
-/* Here we make the necessary library calls to get a window and renderer. The 
-SDL_WINDOWPOS_CENTERED flag will center our window when it pops up for the player. 
-It is possible to setup a fullscreen window however if you are using pixel art 
-this isn’t recommended for reasons that will become obvious once we write code 
-for setting up our sprites. To destroy our renderer and window we’ll code void 
-game_quit(void); the following way. */
-
 void game_quit(void) {
+    int i;
+    for(i=0; i<Game.gfx.n; i++)
+        SDL_FreeSurface(Game.gfx.spritesheet[i]);
+    free(Game.gfx.spritesheet);
+    Game.gfx.spritesheet = NULL;
+ 
     SDL_DestroyRenderer(Game.screen.renderer);
-    SDL_DestroyWindow(Game.screen.window);
-
-    Game.screen.window = NULL;
     Game.screen.renderer = NULL;
-
+ 
+    SDL_DestroyWindow(Game.screen.window);
+    Game.screen.window = NULL;
+ 
     SDL_Quit();
 }
 
-/* At this point if you are encountering errors it is recommended to wrap the 
-library function returns with if-statements to print any errors to stdout as we 
-have done in the past. Now we need to modify our main game loop to provide 
-continuous rendering as well as exiting functionality. It’s quite interesting to 
-note that a window not polling for events (i.e. keypresses, mouse movements, etc.) will show as being non-responsive by the operating system. If on the other hand you are polling for events but aren’t listening for when the window is closed (i.e. red X at top right on windows) then the window will remain open and the only way to close it will require Ctrl+Alt+Delete. Let’s write a new game loop which polls for events and listens for when the window is closed. */
+/* Next we will move to our int main(int argc, char* argv[]); function where 
+we will create textures for the sprites we wish to render. Ideally, the textures 
+should be allocated for each room/level during the loading screen. This works 
+well for a 2D game but isn’t required as most computers can handle the dynamic 
+allocation without much problem. After modifying the code we are left with the 
+following. If you would like to use the same spritesheet as I’m using here you 
+can get it from here. */
 
 int main(int argc, char **argv) {
     Game.init();
+
+    int x = Game.screen.w/2-8;
+    int y = Game.screen.h/2-8;
+
+    SDL_Rect rect = { 0, 0, 8*2, 8*2 };
+    SDL_Texture *texture1 = SDL_CreateTextureFromSurface(Game.screen.renderer, Game.gfx.spritesheet[17]);
+    SDL_Texture *texture2 = SDL_CreateTextureFromSurface(Game.screen.renderer, Game.gfx.spritesheet[18]);
+    SDL_Texture *texture3 = SDL_CreateTextureFromSurface(Game.screen.renderer, Game.gfx.spritesheet[29]);
+    SDL_Texture *texture4 = SDL_CreateTextureFromSurface(Game.screen.renderer, Game.gfx.spritesheet[30]);
 
     SDL_Event event;
     while (Game.running) {
@@ -121,8 +160,33 @@ int main(int argc, char **argv) {
             }
         }
         SDL_RenderClear(Game.screen.renderer);
+        rect.x = 0+x, rect.y = 0+y;
+        SDL_RenderCopy(Game.screen.renderer, texture1, NULL, &rect);
+ 
+        rect.x = 8*2+x, rect.y = 0+y;
+        SDL_RenderCopy(Game.screen.renderer, texture2, NULL, &rect);
+ 
+        rect.x = 0+x, rect.y = 8*2+y;
+        SDL_RenderCopy(Game.screen.renderer, texture3, NULL, &rect);
+ 
+        rect.x = 8*2+x, rect.y = 8*2+y;
+        SDL_RenderCopy(Game.screen.renderer, texture4, NULL, &rect);
+ 
         SDL_RenderPresent(Game.screen.renderer);
     }
-    Game.quit;
-    return (0);
+ 
+    SDL_DestroyTexture(texture1);
+    SDL_DestroyTexture(texture2);
+    SDL_DestroyTexture(texture3);
+    SDL_DestroyTexture(texture4);
+ 
+    Game.quit();
+ 
+    return 0;
 }
+
+/* This will draw a chest in the middle of the screen. Here we are creating a texture 
+for each 8×8 sprite. This is highly inefficient, what we will learn to do later is 
+create a surface with all the 8×8 sprites and then create a texture from this bigger 
+surface. This will help a lot but for now we are fine to do this. The last step here 
+is to clean up the sprite array. */
